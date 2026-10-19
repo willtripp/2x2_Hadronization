@@ -1,0 +1,20 @@
+# Minimal readback configuration for reconstructed SPINE HDF5 files.
+# Notebooks replace DATA_PATH at runtime from the DATA_PATH variable
+# defined at the top of each notebook.
+base:
+  verbosity: info
+
+io:
+  reader:
+    name: hdf5
+    file_keys: DATA_PATH
+
+build:
+  mode: both
+  units: cm
+  fragments: false
+  particles: true
+  interactions: true
+
+geo:
+  detector: 2x2

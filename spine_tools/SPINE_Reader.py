@@ -219,3 +219,55 @@ def reduced_data_loader(driver, out_file, entries_list, attributes):
         if batch:
             writer.writerows(batch)
             batch.clear()
+
+def iter_trigger(driver, out_file, base_attributes, all_attributes):
+    '''
+    Adapted from iter_part_speedup... This takes the speedups we've learned above and applies a cut on trigger.
+    Note that both beam and cosmic ["trigger"]["type"] 5 or 6 id accepted
+
+    This still relies on processing the driver for each entry.. I think a useful combination of the above would be:
+        1. Find all of the entries with triggers
+    '''
+    n_entries    = len(driver)          #set number of entries to loop over
+    progress_int = n_entries // 10      #set update frequency
+    flush_int    = 7500                 #set particle batch size
+
+    match_threshold = 0.666             #set overlap threshold -> add other cut vairable here if desired
+
+    t0 = time.time()
+
+    with open(out_file, "w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames = all_attributes)
+        writer.writeheader()
+
+        # fill up a batch and then write out in bulk to not slam i/o
+        batch = []
+
+        for entry in range(n_entries):
+            data      = driver.process(entry)
+            trig_type = data["trigger"]["type"]
+            if (trig_type != 5) && (trig_type != 6) :
+                continue
+            parts = data.get("reco_particles", [])
+
+            for row in get_part_attr(parts, base_attributes):
+                batch.append(row)
+
+            if len(batch) >= flush_int:
+                writer.writerows(batch)
+                del batch
+                gc.collect()
+                batch = []
+
+            if entry % progress_int == 0 and entry > 0:
+                elapsed = time.time() - t0
+                rate    = entry / elapsed
+                eta     = (n_entries - entry) / rate if rate > 0 else float(inf)
+
+                print(f"{100*entry/n_entries}% Complete")
+                print(f"Rate: {rate:.2f} entries/s")
+                print(f"ETA {eta/60:.1f} min")
+
+        if batch:
+            writer.writerows(batch)
+            batch.clear()
