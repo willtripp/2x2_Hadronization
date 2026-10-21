@@ -10,6 +10,8 @@ import gc
 import time
 import yaml
 
+import numpy as np
+
 from pathlib import Path
 from spine.driver import Driver
 
@@ -20,7 +22,7 @@ def load_driver(filename):
     '''
     #fixme: add in some detector geometry stuff
     DATA_PATH = filename
-    CONFIG    = Path("read_spine_hdf5.yaml")
+    CONFIG    = Path("spine_tools/read_spine_hdf5.yaml")
     cfg_txt   = CONFIG.read_text().replace("DATA_PATH", DATA_PATH)
     cfg       = yaml.safe_load(cfg_txt)
 
@@ -35,7 +37,7 @@ def get_part_attr(particles, base_attributes):
         row = {}
         for a in base_attributes:
             row[a] = getattr(p, a, -1)
-        row["thickness"] = row["size"] / row["length"]
+        # row["thickness"] = row["size"] / row["length"]
         # fixme: num_fragments seems to always be zero...
         # row["fragment_density"] = row["num_fragments"] / row["length"]
         yield row
@@ -245,8 +247,9 @@ def iter_trigger(driver, out_file, base_attributes, all_attributes):
 
         for entry in range(n_entries):
             data      = driver.process(entry)
-            trig_type = data["trigger"]["type"]
-            if (trig_type != 5) && (trig_type != 6) :
+            trig_type = data.get("trigger", [])
+            trig_type = trig_type.type
+            if (int(trig_type) != 5):# & (int(trig_type) != 6) :
                 continue
             parts = data.get("reco_particles", [])
 
@@ -271,3 +274,87 @@ def iter_trigger(driver, out_file, base_attributes, all_attributes):
         if batch:
             writer.writerows(batch)
             batch.clear()
+
+def load_MC_reco_truth(driver, out_file, attributes, all_attributes):
+    '''
+    :param driver:
+    :param out_file:
+    :param truth_attributes:
+    :param reco_attributs:
+    :param shape:
+    :return:
+    '''
+
+    #fixme: It would be nice to have the truth and reco prefixes added automatically
+
+    # ---- Some Preliminaries - initialize these outside of the csv writer so save time? ---- #
+    n_entries       = len(driver)
+    print(f"You are using {n_entries} entries!")
+    progress_int    = max(1, n_entries // 10)      #set intervals for progress updates
+    flush_int       = 5000                         #set a interval to flush the buffer and write out particle info
+    match_threshold = 0.5                          #set an overlap threshold to cut out uncorrelated particle paris
+
+    #Set attribues as paris so they can be iterated in the sam format as particles
+    attr_pairs = [(a,  "reco_" + a, "true_" + a) for a in attributes]
+
+    # modern society is much too concerned with timeliness...
+    t0 = time.time()
+
+    with open(out_file, "w", newline="") as file:
+        writer = csv.DictWriter(file, fieldnames=all_attributes)
+        writer.writeheader()
+
+        # Fill a buffer and then write in batches to not slam i/o
+        buffer = []
+
+        for entry in range(n_entries):
+            data     = driver.process(entry=entry)
+            pairs    = data.get("particle_matches_r2t", [])
+            overlaps = np.asarray(data.get("particle_matches_r2t_overlap", np.ones(len(pairs))))
+            #data.get("particle_matches_t2r_overlap", np.ones(len(pairs)))
+
+            #fixme: try and vectorize these steps to avoid nesting slow for loops
+            for i, (reco_p, truth_p) in enumerate(pairs):
+                overlap = overlaps[i]
+
+                row = {}
+
+                row["entry"] = entry
+
+                for a, r_a, t_a, in attr_pairs:
+                    row[r_a] = getattr(reco_p, a, -1)
+                    row[t_a] = getattr(truth_p, a, -1)
+
+                #fixme: also add these to the attributes list
+                row["reco_pid_scores"] = getattr(reco_p, "pid_scores", -1)
+                row["overlap"] = overlap
+
+                buffer.append(row)
+
+            if len(buffer) >= flush_int:
+                # print(f"Flushing buffer on entry: {entry}")
+                writer.writerows(buffer)
+                buffer.clear()
+                gc.collect()
+
+            if entry % progress_int == 0 and entry > 0:
+                elapsed = time.time() - t0
+                rate    = entry / elapsed
+                eta     = (n_entries - entry) / rate if rate > 0 else float("inf")
+                print(f"{100*entry/n_entries}% Complete")
+                print(f"Rate: {rate:.2f} entries/s")
+                print(f"ETA {eta/60:.1f} min")
+
+        if buffer:
+            writer.writerows(buffer)
+            buffer.clear()
+
+            # # del data
+            # if entry == int( len(driver) / 4 ):
+            #     print("Quarter of the way there!")
+            #     gc.collect()
+            # if entry == int( len(driver) / 2 ):
+            #     print("Halfway There!")
+            #     gc.collect()
+
+        print(f"Done Writing to {out_file}! Total time {(time.time() - t0):.2f}s")
