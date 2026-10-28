@@ -150,6 +150,103 @@ def plot_data_mc(
     return fig, (ax_main, ax_ratio)
 
 
+def plot_2d_hist(
+    df: pd.DataFrame,
+    x_column: str,
+    y_column: str,
+    x_bins=50,
+    y_bins=50,
+    xlabel: str = None,
+    ylabel: str = None,
+    title: str = None,
+    cbar_label: str = "Entries",
+    weight_col: str = None,
+    log_z: bool = False,
+    normalize: bool = False,
+    cmap: str = "viridis",
+    cmin: float = None,
+    outfile: str = None,
+    ax=None,
+):
+    """
+    Make a two-dimensional histogram of one DataFrame (Data or MC).
+
+    Parameters
+    ----------
+    df : pd.DataFrame
+        DataFrame containing at least `x_column` and `y_column`.
+    x_column, y_column : str
+        Columns to plot on the x and y axes (e.g. "length" vs "thickness").
+    x_bins, y_bins : int or array-like
+        Bin count or explicit bin edges for each axis (as in np.histogram2d).
+    weight_col : str, optional
+        Column to use as per-entry weights. If None, unweighted counts are used.
+    log_z : bool
+        If True, use a logarithmic color scale (empty bins are left blank).
+    normalize : bool
+        If True, normalize so the sum of all bin contents is 1.
+    cmap : str
+        Matplotlib colormap name.
+    cmin : float, optional
+        Bins with contents below this value are left blank (e.g. cmin=1
+        hides empty bins).
+    outfile : str, optional
+        If given, save the figure to this path.
+    ax : matplotlib Axes, optional
+        Draw onto an existing axes instead of creating a new figure.
+
+    Returns
+    -------
+    fig, ax, (counts, x_edges, y_edges)
+    """
+    from matplotlib.colors import LogNorm
+
+    # Drop rows where either coordinate is missing / infinite
+    cols = [x_column, y_column] + ([weight_col] if weight_col else [])
+    clean = df[cols].replace([np.inf, -np.inf], np.nan).dropna()
+
+    x_vals = clean[x_column].to_numpy()
+    y_vals = clean[y_column].to_numpy()
+    weights = clean[weight_col].to_numpy() if weight_col else None
+
+    counts, x_edges, y_edges = np.histogram2d(
+        x_vals, y_vals, bins=[x_bins, y_bins], weights=weights,
+    )
+
+    if normalize and counts.sum() > 0:
+        counts = counts / counts.sum()
+        if cbar_label == "Entries":
+            cbar_label = "Fraction of entries"
+
+    # Mask bins that should not be drawn
+    plot_counts = np.ma.masked_invalid(counts.astype(float))
+    if cmin is not None:
+        plot_counts = np.ma.masked_where(counts < cmin, plot_counts)
+    if log_z:
+        plot_counts = np.ma.masked_where(counts <= 0, plot_counts)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 6))
+    else:
+        fig = ax.figure
+
+    norm = LogNorm() if log_z else None
+    # histogram2d returns counts[x, y]; pcolormesh expects [y, x], so transpose
+    mesh = ax.pcolormesh(x_edges, y_edges, plot_counts.T, cmap=cmap, norm=norm)
+    fig.colorbar(mesh, ax=ax, label=cbar_label)
+
+    ax.set_xlabel(xlabel if xlabel else x_column)
+    ax.set_ylabel(ylabel if ylabel else y_column)
+    if title:
+        ax.set_title(title)
+
+    if outfile:
+        fig.savefig(outfile, dpi=150, bbox_inches="tight")
+        print(f"Saved plot to {outfile}")
+
+    return fig, ax, (counts, x_edges, y_edges)
+
+
 if __name__ == "__main__":
     # Example usage with your Track_Thickness.py outputs
     mc_df = pd.read_csv("MC_Particles_Test.csv")
@@ -175,6 +272,33 @@ if __name__ == "__main__":
         category_col="pid",
         normalize_mc_to_data=True,
         outfile="length_data_mc.png",
+    )
+
+    # Example: 2D histogram of length vs thickness (MC and Data separately)
+    plot_2d_hist(
+        mc_df,
+        x_column="length",
+        y_column="thickness",
+        x_bins=np.linspace(0, 200, 41),
+        y_bins=np.linspace(0, 5, 51),
+        xlabel="Track length [cm]",
+        ylabel="Track thickness [size / length]",
+        title="MC: thickness vs length",
+        cmin=1,
+        outfile="thickness_vs_length_mc.png",
+    )
+
+    plot_2d_hist(
+        data_df,
+        x_column="length",
+        y_column="thickness",
+        x_bins=np.linspace(0, 200, 41),
+        y_bins=np.linspace(0, 5, 51),
+        xlabel="Track length [cm]",
+        ylabel="Track thickness [size / length]",
+        title="Data: thickness vs length",
+        log_z=True,
+        outfile="thickness_vs_length_data.png",
     )
 
     # plt.show()
