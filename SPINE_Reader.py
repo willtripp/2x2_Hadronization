@@ -20,7 +20,6 @@ def load_driver(filename):
     Finally: a function that when given a file path, loads the driver for you so one doesn't have to write it out every
     time a new script is required
     '''
-    #fixme: add in some detector geometry stuff
     DATA_PATH = filename
     CONFIG    = Path("spine_tools/read_spine_hdf5.yaml")
     cfg_txt   = CONFIG.read_text().replace("DATA_PATH", DATA_PATH)
