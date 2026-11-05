@@ -11,6 +11,7 @@ import matplotlib.pyplot as plt
 
 from SPINE_Reader import load_driver
 from plot_data_mc import plot_data_mc
+from plot_data_mc import plot_2d_hist
 ## ----- Function to calculate the distance of each deposit ----- ##
 def calc_dist(track_start, track_end, points):
     '''
@@ -54,7 +55,82 @@ def calc_dist(track_start, track_end, points):
     # print(distances.shape)
     return distances
 
-# def bragg_dep():
+def get_dQdx(particle):
+    dx          = particle.length
+    depositions = np.array(particle.depositions)
+    dQ          = depositions.sum()
+
+    return dQ / dx
+
+def get_bragg_dQdx(particle):
+    '''
+    A function to find the dQ/dx depositions for the bragg peak. In this case it considers the last 10c of the track.
+    Note: particles must be contained
+    Parameters
+    ----------
+    points
+    depositions
+
+    Returns
+    -------
+
+    '''
+    if particle.is_contained == False:
+        #TODO: The end point must be contained, we actauilly don't care if it starts outside...
+        raise ValueError("Particle must be contained")
+    if particle.shape != 1:
+        raise ValueError("Particle must be a Track")
+
+    start_point = np.array(particle.start_point)
+    end_point   = np.array(particle.end_point)
+    track       = end_point - start_point
+    points      = np.array(particle.points)
+    depositions = np.array(particle.depositions)
+    length      = particle.length
+
+    # If a particle travels less than 10cm the whole thing is a bragg peak
+    if length < 10:
+        dQdx = depositions.sum() / length
+        return dQdx
+
+    # If not then we need to scale
+    frac = 10 / length
+
+    # set a threshold for the projection
+    threshold  = 1 - frac
+
+    #calculate the projection onto the track as a fraction
+    u = np.array(particle.points) - start_point
+
+    proj = (np.dot(u, track) / (length * length))
+
+    # print(len(proj))
+    # print(proj)
+
+    proj[proj < threshold] = 0
+    proj[proj >= threshold] = 1
+
+    # print(proj)
+
+    mask = proj > 0
+
+    #fixme: ahahaha these dimensions don't make any sense lol
+    last_10cm_points = points[mask]
+    last_10cm_depositions = depositions[mask]
+
+    if last_10cm_depositions.size == 0:
+        return -1
+
+    # print(last_10cm_points)
+    # print(last_10cm_depositions)
+
+    # dx = np.sum(np.linalg.norm(np.diff(last_10cm_points, axis=0), axis=1))
+    dx = np.linalg.norm(end_point - last_10cm_points[0])
+    # print(dx)
+
+    dQ = np.sum(last_10cm_depositions)
+
+    return dQ / dx
 
 def get_stats(distances):
     '''
@@ -100,66 +176,106 @@ def process_particle(entry , particle, is_truth=False):
 
     containment = particle.is_contained
 
-    length = particle.tr
+    length = particle.length
+
+    dQdx = get_dQdx(particle)
+
+    bragg_dQdx = get_bragg_dQdx(particle)
 
     if is_truth:
-        df = pd.DataFrame([{"entry": entry, "truth_mean": mean, "truth_max": max, "truth_std": std, "truth_containment": containment}])
+        df = pd.DataFrame([{"entry": entry,
+                            "truth_mean": mean,
+                            "truth_max": max,
+                            "truth_std": std,
+                            "truth_containment": containment,
+                            "truth_dQdx": dQdx,
+                            "truth_bragg_dQdx": bragg_dQdx,}])
     else:
-        df = pd.DataFrame([{"entry": np.array(entry), "mean": np.array(mean), "max": np.array(max), "std": np.array(std), "is_contained": containment}])
+        df = pd.DataFrame([{"entry": np.array(entry),
+                            "mean": np.array(mean),
+                            "max": np.array(max),
+                            "std": np.array(std),
+                            "is_contained": containment,
+                            "dQdx": dQdx,
+                            "bragg_dQdx": bragg_dQdx,}])
 
     return df
 
+if __name__ == "__main__":
+    # load in the driver
+    driver = load_driver("/Users/williamtripp/Desktop/DUNE/data/Sandbox/SPINE/*.hdf5")
 
-# load in the driver
-driver = load_driver("/Users/williamtripp/Desktop/DUNE/data/Sandbox/SPINE/*.hdf5")
+    # One Mega list of all the distances
+    entry       = []
+    interaction = []
 
-# One Mega list of all the distances
-entry       = []
-interaction = []
+    data_dists  = []
+    data_means  = []
+    data_maxs   = []
+    data_stds   = []
+    data_pids   = []
 
-data_dists  = []
-data_means  = []
-data_maxs   = []
-data_stds   = []
-data_pids   = []
+    containment = []    #will for sure be useful...
 
-containment = []    #will for sure be useful...
+    data_df = pd.DataFrame()
 
-data_df = pd.DataFrame()
-
-for entry in range(len(driver)):
-    data = driver.process(entry)
-    trig_type = data.get("trigger", [])
-    trig_type = trig_type.type
-    if trig_type != 5:
-        continue
-    particles = data.get("reco_particles", [])
-    for p in particles:
-        if p.shape != 1:
+    for entry in range(len(driver)):
+        data = driver.process(entry)
+        trig_type = data.get("trigger", [])
+        trig_type = trig_type.type
+        if trig_type != 5:
             continue
-        data_df = pd.concat([data_df, process_particle(entry, p)], ignore_index=True)
+        particles = data.get("reco_particles", [])
+        for p in particles:
+            if p.shape != 1:
+                continue
+            if p.is_contained != True:
+                continue
+            data_df = pd.concat([data_df, process_particle(entry, p)], ignore_index=True)
 
-## ----- Monte Carlo Time ----- ##
-MC_driver = load_driver("/Users/williamtripp/Desktop/DUNE/simulation/MiniRun6.5/SPINE/*.hdf5")
+    ## ----- Monte Carlo Time ----- ##
+    MC_driver = load_driver("/Users/williamtripp/Desktop/DUNE/simulation/MiniRun6.5/SPINE/MiniRun6.5_1E19_RHC.spine.000000*.MLRECO_SPINE.hdf5")
 
-mc_df = pd.DataFrame()
+    mc_df = pd.DataFrame()
 
-for entry in range(len(MC_driver)):
-    mc       = MC_driver.process(entry)
-    pairs    = mc.get("particle_matches_r2t", [])
-    overlaps = np.asarray(mc.get("particle_matches_r2t_overlaps", np.ones(len(pairs))))
+    for entry in range(len(MC_driver)):
+        mc       = MC_driver.process(entry)
+        pairs    = mc.get("particle_matches_r2t", [])
+        overlaps = np.asarray(mc.get("particle_matches_r2t_overlaps", np.ones(len(pairs))))
 
-    for i, (reco_p, truth_p) in enumerate(pairs):
-        if reco_p.shape != 1:
-            continue
-        mc_df = pd.concat([mc_df, process_particle(entry, reco_p)], ignore_index=True)
+        for i, (reco_p, truth_p) in enumerate(pairs):
+            if reco_p.shape != 1:
+                continue
+            if reco_p.is_contained != True:
+                continue
+            mc_df = pd.concat([mc_df, process_particle(entry, reco_p)], ignore_index=True)
 
-plot_data_mc(
-    data_df, mc_df,
-    column = "mean",
-    bins   = np.linspace(0, 4, 20),
-    xlabel = "Distance from dep voxel to track [mm]",
-    title  = "Track thickness data / mc",
-    normalize_mc_to_data = True,
-    outfile=("plots/avg_dep_dist_full.png"),
-)
+    # plot_data_mc(
+    #     data_df, mc_df,
+    #     column = "mean",
+    #     bins   = np.linspace(0, 4, 20),
+    #     xlabel = "Distance from dep voxel to track [cm]",
+    #     title  = "Track thickness data / mc",
+    #     normalize_mc_to_data = True,
+    #     outfile=("plots/avg_dep_dist.png"),
+    # )
+
+    plot_data_mc(
+        data_df, mc_df,
+        column = "dQdx",
+        bins = np.linspace(0, 10, 10),
+        xlabel = "dQ/dx [ke / cm]",
+        title = "Track dQ/dx",
+        normalize_mc_to_data= True,
+        outfile=("plots/Track_dqdx_test.png"),
+    )
+
+    plot_data_mc(
+        data_df, mc_df,
+        column="bragg_dQdx",
+        bins=np.linspace(0, 10, 10),
+        xlabel="dQ/dx [ke / cm]",
+        title="Track dQ/dx for last 10cm (Bragg Peak)",
+        normalize_mc_to_data=True,
+        outfile=("plots/Track_bragg_dqdx_test.png"),
+    )
