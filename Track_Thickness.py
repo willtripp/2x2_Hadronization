@@ -5,6 +5,9 @@ The goal of this script is to calculate a meaningful measure of thickness for re
 going from start to end and each deposit's distance to that line
 """
 
+##TODO: Implement a way to find dE/dx using 1-2cm segments instead... This will actually show the large increase rather
+##TODO: than having peaks wash out in the average...
+
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
@@ -55,14 +58,26 @@ def calc_dist(track_start, track_end, points):
     # print(distances.shape)
     return distances
 
-def get_dQdx(particle):
+def get_dEdx(particle):
+    start_point = np.array(particle.start_point)
+    end_point   = np.array(particle.end_point)
+    track       = end_point - start_point
+    length      = particle.length
+
+    # want to find dEdx over smaller dx
+    step_size   = 2.0
+    num_sements = int(np.floor(length / step_size))    #np.floor rounds down
+
+    # Unit vector for track
+    unit = track / length
+
     dx          = particle.length
     depositions = np.array(particle.depositions)
-    dQ          = depositions.sum()
+    dE          = depositions.sum()
 
-    return dQ / dx
+    return dE, dx
 
-def get_bragg_dQdx(particle):
+def get_bragg_dEdx(particle):
     '''
     A function to find the dQ/dx depositions for the bragg peak. In this case it considers the last 10c of the track.
     Note: particles must be contained
@@ -90,8 +105,9 @@ def get_bragg_dQdx(particle):
 
     # If a particle travels less than 10cm the whole thing is a bragg peak
     if length < 10:
-        dQdx = depositions.sum() / length
-        return dQdx
+        dE = depositions.sum()
+        dx = length
+        return dE, dx
 
     # If not then we need to scale
     frac = 10 / length
@@ -112,14 +128,14 @@ def get_bragg_dQdx(particle):
 
     # print(proj)
 
+    #want a boolean mask from the ones and zeros
     mask = proj > 0
 
-    #fixme: ahahaha these dimensions don't make any sense lol
     last_10cm_points = points[mask]
     last_10cm_depositions = depositions[mask]
 
     if last_10cm_depositions.size == 0:
-        return -1
+        return -1, -1
 
     # print(last_10cm_points)
     # print(last_10cm_depositions)
@@ -128,9 +144,9 @@ def get_bragg_dQdx(particle):
     dx = np.linalg.norm(end_point - last_10cm_points[0])
     # print(dx)
 
-    dQ = np.sum(last_10cm_depositions)
+    dE = np.sum(last_10cm_depositions)
 
-    return dQ / dx
+    return dE, dx
 
 def get_stats(distances):
     '''
@@ -178,9 +194,9 @@ def process_particle(entry , particle, is_truth=False):
 
     length = particle.length
 
-    dQdx = get_dQdx(particle)
+    dE, dx = get_dEdx(particle)
 
-    bragg_dQdx = get_bragg_dQdx(particle)
+    bragg_dE, bragg_dx = get_bragg_dEdx(particle)
 
     if is_truth:
         df = pd.DataFrame([{"entry": entry,
@@ -188,22 +204,29 @@ def process_particle(entry , particle, is_truth=False):
                             "truth_max": max,
                             "truth_std": std,
                             "truth_containment": containment,
-                            "truth_dQdx": dQdx,
-                            "truth_bragg_dQdx": bragg_dQdx,}])
+                            "truth_dE": dE,
+                            "truth_dx": dx,
+                            "truth_bragg_dE": bragg_dE,
+                            "truth_bragg_dx": bragg_dx,}])
     else:
         df = pd.DataFrame([{"entry": np.array(entry),
                             "mean": np.array(mean),
                             "max": np.array(max),
                             "std": np.array(std),
                             "is_contained": containment,
-                            "dQdx": dQdx,
-                            "bragg_dQdx": bragg_dQdx,}])
+                            "dE": dE,
+                            "dx": dx,
+                            "dEdx": dE / dx,
+                            "bragg_dE": bragg_dE,
+                            "bragg_dx": bragg_dx,
+                            "bragg_dEdx": bragg_dE / bragg_dx}])
 
     return df
 
 if __name__ == "__main__":
     # load in the driver
-    driver = load_driver("/Users/williamtripp/Desktop/DUNE/data/Sandbox/SPINE/*.hdf5")
+    # driver = load_driver("/Users/williamtripp/Desktop/DUNE/data/Sandbox/SPINE/*.hdf5")
+    driver = load_driver("/Users/williamtripp/Desktop/DUNE/data/Sandbox/SPINE/packet-0050017-2024_07_09_00_04_33_CDT.MLRECO_SPINE.hdf5")
 
     # One Mega list of all the distances
     entry       = []
@@ -234,7 +257,8 @@ if __name__ == "__main__":
             data_df = pd.concat([data_df, process_particle(entry, p)], ignore_index=True)
 
     ## ----- Monte Carlo Time ----- ##
-    MC_driver = load_driver("/Users/williamtripp/Desktop/DUNE/simulation/MiniRun6.5/SPINE/MiniRun6.5_1E19_RHC.spine.000000*.MLRECO_SPINE.hdf5")
+    # MC_driver = load_driver("/Users/williamtripp/Desktop/DUNE/simulation/MiniRun6.5/SPINE/MiniRun6.5_1E19_RHC.spine.000000*.MLRECO_SPINE.hdf5")
+    MC_driver = load_driver("/Users/williamtripp/Desktop/DUNE/simulation/MiniRun6.5/SPINE/MiniRun6.5_1E19_RHC.spine.0000000.MLRECO_SPINE.hdf5")
 
     mc_df = pd.DataFrame()
 
@@ -262,20 +286,44 @@ if __name__ == "__main__":
 
     plot_data_mc(
         data_df, mc_df,
-        column = "dQdx",
-        bins = np.linspace(0, 10, 10),
-        xlabel = "dQ/dx [ke / cm]",
-        title = "Track dQ/dx",
+        column = "dEdx",
+        bins = np.linspace(0, 30, 25),
+        xlabel = "dE/dx [MeV / cm]",
+        title = "Track dE/dx",
         normalize_mc_to_data= True,
-        outfile=("plots/Track_dqdx_test.png"),
+        outfile=("plots/Track_dqdx_larger_test.png"),
     )
 
     plot_data_mc(
         data_df, mc_df,
-        column="bragg_dQdx",
-        bins=np.linspace(0, 10, 10),
-        xlabel="dQ/dx [ke / cm]",
-        title="Track dQ/dx for last 10cm (Bragg Peak)",
+        column="bragg_dEdx",
+        bins=np.linspace(0, 30, 25),
+        xlabel="dE/dx [MeV / cm]",
+        title="Track dE/dx for last 10cm (Bragg Peak)",
         normalize_mc_to_data=True,
-        outfile=("plots/Track_bragg_dqdx_test.png"),
+        outfile=("plots/Track_bragg_dqdx_larger_test.png"),
+    )
+
+    plot_2d_hist(
+        data_df,
+        x_column="dx",
+        y_column="dE",
+        x_bins=np.linspace(0, 100, 50),
+        y_bins=np.linspace(0, 500, 50),
+        xlabel="dx [cm]",
+        ylabel="dE [MeV]",
+        title="dE/dx for Contained Tracks",
+        outfile=("plots/Track_dEdc_Heatmap_test.png")
+    )
+
+    plot_2d_hist(
+        data_df,
+        x_column="bragg_dx",
+        y_column="bragg_dE",
+        x_bins=np.linspace(0, 100, 50),
+        y_bins=np.linspace(0, 500, 50),
+        xlabel="dx [cm]",
+        ylabel="dE [MeV]",
+        title="Bragg Peak (last 10cm) dE/dx for Contained Tracks",
+        outfile=("plots/Track_bragg_dEdc_Heatmap_test.png")
     )
