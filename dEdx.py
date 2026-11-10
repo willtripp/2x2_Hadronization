@@ -123,7 +123,8 @@ if __name__ == "__main__":
     data_df = pd.DataFrame({"dEdx": dEdx_list, "dep_range": dep_range_list})#, "length": length_list})
 
     ## ----- MC Time ----- ##
-    MC_driver = load_driver("/Users/williamtripp/Desktop/DUNE/simulation/MiniRun6.5/SPINE/MiniRun6.5_1E19_RHC.spine.000000*.MLRECO_SPINE.hdf5")
+    # MC_driver = load_driver("/Users/williamtripp/Desktop/DUNE/simulation/MiniRun6.5/SPINE_Subset/*.hdf5")
+    MC_driver = load_driver("/Users/williamtripp/Desktop/DUNE/simulation/MiniRun6.5/SPINE/MiniRun6.5_1E19_RHC.spine.00000*.MLRECO_SPINE.hdf5")
     # MC_driver = load_driver("/Users/williamtripp/Desktop/DUNE/simulation/MiniRun6.5/SPINE/MiniRun6.5_1E19_RHC.spine.0000000.MLRECO_SPINE.hdf5")
 
     dEdx_list      = []
@@ -170,8 +171,8 @@ if __name__ == "__main__":
         data_df,
         x_column="dep_range",
         y_column="dEdx",
-        x_bins=np.linspace(0, 120, 50),
-        y_bins=np.linspace(0, 20, 50),
+        x_bins=np.linspace(0, 80, 40),
+        y_bins=np.linspace(0, 11, 40),
         xlabel="Residual Range [cm]",
         ylabel="dE/dx [MeV/cm]",
         title="Data dE/dx for Contained Tracks",
@@ -182,8 +183,8 @@ if __name__ == "__main__":
         mc_df,
         x_column="dep_range",
         y_column="dEdx",
-        x_bins=np.linspace(0, 120, 50),
-        y_bins=np.linspace(0, 20, 50),
+        x_bins=np.linspace(0, 80, 40),
+        y_bins=np.linspace(0, 11, 40),
         xlabel="Residual Range [cm]",
         ylabel="dE/dx [MeV/cm]",
         title="MC dE/dx for Contained Tracks",
