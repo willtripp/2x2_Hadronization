@@ -150,6 +150,238 @@ def plot_data_mc(
     return fig, (ax_main, ax_ratio)
 
 
+def plot_data_only(
+    data_df: pd.DataFrame,
+    column: str,
+    bins,
+    xlabel: str = None,
+    ylabel: str = "Entries",
+    title: str = None,
+    data_label: str = "Data",
+    log_y: bool = False,
+    outfile: str = None,
+    ax=None,
+):
+    """
+    Plot only Data, drawn as black points with statistical (sqrt(N)) error
+    bars, in the same style as the Data points in `plot_data_mc`.
+
+    Parameters
+    ----------
+    data_df : pd.DataFrame
+        DataFrame containing at least `column`.
+    column : str
+        Name of the column to histogram (e.g. "thickness").
+    bins : int or array-like
+        Passed straight to np.histogram_bin_edges.
+    log_y : bool
+        If True, use a logarithmic y axis.
+    outfile : str, optional
+        If given, save the figure to this path.
+    ax : matplotlib Axes, optional
+        Draw onto an existing axes instead of creating a new figure.
+
+    Returns
+    -------
+    fig, ax
+    """
+    data_vals = data_df[column].to_numpy()
+    data_vals = data_vals[np.isfinite(data_vals)]
+
+    bin_edges = np.histogram_bin_edges(data_vals, bins=bins)
+    bin_centers = 0.5 * (bin_edges[:-1] + bin_edges[1:])
+    bin_widths = np.diff(bin_edges)
+
+    data_counts, _ = np.histogram(data_vals, bins=bin_edges)
+    data_errs = np.sqrt(data_counts)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 5))
+    else:
+        fig = ax.figure
+
+    ax.errorbar(
+        bin_centers, data_counts, yerr=data_errs, xerr=bin_widths / 2,
+        fmt="ko", markersize=4, capsize=0, label=data_label,
+    )
+
+    ax.set_xlabel(xlabel if xlabel else column)
+    ax.set_ylabel(ylabel)
+    if title:
+        ax.set_title(title)
+    if log_y:
+        ax.set_yscale("log")
+    ax.legend(frameon=False)
+
+    if outfile:
+        fig.savefig(outfile, dpi=150, bbox_inches="tight")
+        print(f"Saved plot to {outfile}")
+
+    return fig, ax
+
+
+def plot_mc_only(
+        mc_df,
+        column,
+        bins,
+        xlabel: str = None,
+        ylabel: str = "Entries",
+        title: str = None,
+        mc_label="MC",
+        mc_weight_col: str = None,
+        category_col: str = None,
+        log_y: bool = False,
+        resolution: bool = False,
+        outfile: str = None,
+        ax=None,
+):
+    """
+    Plot only MC. A single MC sample is drawn as a filled histogram in the
+    same style as the MC in `plot_data_mc` (steelblue stepfilled, or stacked
+    by category). Multiple MC samples are overlaid as line-only (step)
+    histograms, one colour per sample.
+
+    Parameters
+    ----------
+    mc_df : pd.DataFrame, list of pd.DataFrame, or dict of {label: pd.DataFrame}
+        MC DataFrame(s), each containing at least `column` (and
+        `category_col` if used). Pass a list or dict to plot several MC
+        distributions at once; dict keys are used as legend labels.
+    mc_label : str or list of str
+        Legend label(s). For a list of DataFrames, give a list of labels
+        (otherwise "MC 1", "MC 2", ... are used). Ignored for a dict, whose
+        keys are the labels.
+    column : str, list of str, or dict of {label: str}
+        Name of the column to histogram (e.g. "thickness"). A single string
+        is used for every MC sample. To use a different column for each
+        sample, pass a list (one entry per DataFrame, in order) or a dict
+        keyed by the same labels as the samples. If `mc_df` is a single
+        DataFrame, a list of columns (legend labels default to the column
+        names, or use `mc_label`) or a {label: column} dict overlays
+        several columns from that one DataFrame.
+    bins : int or array-like
+        Passed straight to np.histogram_bin_edges.
+    mc_weight_col : str, optional
+        Column in mc_df to use as per-entry weights. If None, unweighted
+        counts are used.
+    category_col : str, optional
+        If given, MC is stacked by unique values in mc_df[category_col]
+        (e.g. particle species / pid) instead of drawn as one histogram.
+        Only supported for a single MC DataFrame.
+    log_y : bool
+        If True, use a logarithmic y axis.
+    outfile : str, optional
+        If given, save the figure to this path.
+    ax : matplotlib Axes, optional
+        Draw onto an existing axes instead of creating a new figure.
+
+    Returns
+    -------
+    fig, ax
+    """
+    # Normalise input to a list of (label, DataFrame) pairs
+    if isinstance(mc_df, pd.DataFrame) and isinstance(column, dict):
+        # One DataFrame, several columns: {label: column_name}
+        samples = [(lab, mc_df) for lab in column]
+    elif isinstance(mc_df, pd.DataFrame) and isinstance(column, (list, tuple)):
+        # One DataFrame, several columns: labels default to the column names
+        if isinstance(mc_label, (list, tuple)):
+            labels = list(mc_label)
+            if len(labels) != len(column):
+                raise ValueError("mc_label must have one entry per column")
+        else:
+            labels = [str(c) for c in column]
+        samples = [(lab, mc_df) for lab in labels]
+    elif isinstance(mc_df, dict):
+        samples = list(mc_df.items())
+    elif isinstance(mc_df, (list, tuple)):
+        if isinstance(mc_label, (list, tuple)):
+            labels = list(mc_label)
+            if len(labels) != len(mc_df):
+                raise ValueError("mc_label must have one entry per MC DataFrame")
+        else:
+            labels = [f"{mc_label} {i + 1}" for i in range(len(mc_df))]
+        samples = list(zip(labels, mc_df))
+    else:
+        samples = [(mc_label, mc_df)]
+
+    # Resolve which column to use for each sample
+    if isinstance(column, dict):
+        missing = [lab for lab, _ in samples if lab not in column]
+        if missing:
+            raise ValueError(f"column dict is missing entries for: {missing}")
+        columns = [column[lab] for lab, _ in samples]
+    elif isinstance(column, (list, tuple)):
+        if len(column) != len(samples):
+            raise ValueError("column must have one entry per MC DataFrame")
+        columns = list(column)
+    else:
+        columns = [column] * len(samples)
+
+    multiple = len(samples) > 1
+    if multiple and category_col is not None:
+        raise ValueError("category_col is only supported for a single MC DataFrame")
+
+    all_vals = np.concatenate([df[c].to_numpy() for (_, df), c in zip(samples, columns)])
+    bin_edges = np.histogram_bin_edges(all_vals[np.isfinite(all_vals)], bins=bins)
+
+    if ax is None:
+        fig, ax = plt.subplots(figsize=(7, 5))
+    else:
+        fig = ax.figure
+
+    # Single-sample case uses the first (only) entry
+    mc_label, mc_df = samples[0]
+    column = columns[0]
+    mc_vals = mc_df[column].to_numpy()
+
+    if multiple:
+        # Line-only histograms so overlapping samples stay readable
+        for (label, df), col in zip(samples, columns):
+            vals = df[col].to_numpy()
+            weights = df[mc_weight_col].to_numpy() if mc_weight_col else np.ones(len(vals))
+            ax.hist(
+                vals, bins=bin_edges, weights=weights,
+                histtype="step", linewidth=1.8, label=label,
+            )
+    elif category_col is not None:
+        categories = sorted(mc_df[category_col].dropna().unique())
+        stacked_vals = [mc_df.loc[mc_df[category_col] == c, column].to_numpy() for c in categories]
+        stacked_weights = [
+            (mc_df.loc[mc_df[category_col] == c, mc_weight_col].to_numpy()
+             if mc_weight_col else np.ones((mc_df[category_col] == c).sum()))
+            for c in categories
+        ]
+        ax.hist(
+            stacked_vals, bins=bin_edges, weights=stacked_weights,
+            stacked=True, histtype="stepfilled", alpha=0.7,
+            label=[f"{mc_label}: {c}" for c in categories],
+        )
+    else:
+        mc_weights = mc_df[mc_weight_col].to_numpy() if mc_weight_col else np.ones(len(mc_vals))
+        ax.hist(
+            mc_vals, bins=bin_edges, weights=mc_weights,
+            histtype="stepfilled", color="steelblue", alpha=0.6, label=mc_label,
+        )
+
+    default_xlabel = " / ".join(dict.fromkeys(str(c) for c in columns))
+    ax.set_xlabel(xlabel if xlabel else default_xlabel)
+    ax.set_ylabel(ylabel)
+    if title:
+        ax.set_title(title)
+    if log_y:
+        ax.set_yscale("log")
+    ax.legend(frameon=False)
+    if resolution:
+        ax.axvline(x=0.0, color='red', linestyle='--', linewidth=1.5)
+
+    if outfile:
+        fig.savefig(outfile, dpi=150, bbox_inches="tight")
+        print(f"Saved plot to {outfile}")
+
+    return fig, ax
+
+
 def plot_2d_hist(
     df: pd.DataFrame,
     x_column: str,
@@ -260,6 +492,35 @@ if __name__ == "__main__":
         title="Track thickness: Data vs MC",
         normalize_mc_to_data=True,
         outfile="thickness_data_mc.png",
+    )
+
+    # Example: Data only (points with errors) and MC only (filled histogram)
+    plot_data_only(
+        data_df,
+        column="thickness",
+        bins=np.linspace(0, 5, 51),
+        xlabel="Track thickness [size / length]",
+        title="Track thickness: Data",
+        outfile="thickness_data_only.png",
+    )
+
+    plot_mc_only(
+        mc_df,
+        column="thickness",
+        bins=np.linspace(0, 5, 51),
+        xlabel="Track thickness [size / length]",
+        title="Track thickness: MC",
+        outfile="thickness_mc_only.png",
+    )
+
+    # Example: overlay several MC distributions as lines (dict keys = labels)
+    plot_mc_only(
+        {"MC A": mc_df, "MC B": mc_df[mc_df["length"] > 50]},
+        column="thickness",
+        bins=np.linspace(0, 5, 51),
+        xlabel="Track thickness [size / length]",
+        title="Track thickness: multiple MC",
+        outfile="thickness_mc_multi.png",
     )
 
     # Example: stack MC by particle ID

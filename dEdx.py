@@ -63,15 +63,16 @@ def segmented_dEdx(particle, segment_length):
     for i in range(n_steps):
 
         mask = (len <= proj_dists) & (proj_dists < (len + segment_length))
+        midpoint = len + (0.5 * segment_length)
         len += segment_length
-        # mask[proj_dists < len]# + segment_length))
+        # mask[proj_dists < len]# + segment_length)
 
         # len += segment_length
 
         masked_depositions = depositions[mask]
 
         dEdx[i]  = masked_depositions.sum() / segment_length
-        dep_res_range[i] = length - len
+        dep_res_range[i] = length - midpoint
 
     #treat any remaining dist that didn't divide nicely by two.
     #toss out values less than 0.25 to avoid skewing the data with low denominators
@@ -83,7 +84,7 @@ def segmented_dEdx(particle, segment_length):
         masked_depositions = depositions[mask]
 
         dEdx[-1]  = masked_depositions.sum() / (length - len)
-        dep_res_range[-1] = 0
+        dep_res_range[-1] = 0.5 * (length - len)
 
     return dEdx, dep_res_range
 
@@ -110,7 +111,7 @@ if __name__ == "__main__":
             if p.is_contained != True:
                 continue
 
-            dEdx, dep_range = segmented_dEdx(p, 2.0)
+            dEdx, dep_range = segmented_dEdx(p, 1.0)
             # length = p.length
 
             dEdx_list.extend(dEdx)
@@ -124,7 +125,7 @@ if __name__ == "__main__":
 
     ## ----- MC Time ----- ##
     # MC_driver = load_driver("/Users/williamtripp/Desktop/DUNE/simulation/MiniRun6.5/SPINE_Subset/*.hdf5")
-    MC_driver = load_driver("/Users/williamtripp/Desktop/DUNE/simulation/MiniRun6.5/SPINE/MiniRun6.5_1E19_RHC.spine.00000*.MLRECO_SPINE.hdf5")
+    MC_driver = load_driver("/Users/williamtripp/Desktop/DUNE/simulation/MiniRun6.5/SPINE/MiniRun6.5_1E19_RHC.spine.*.MLRECO_SPINE.hdf5")
     # MC_driver = load_driver("/Users/williamtripp/Desktop/DUNE/simulation/MiniRun6.5/SPINE/MiniRun6.5_1E19_RHC.spine.0000000.MLRECO_SPINE.hdf5")
 
     dEdx_list      = []
@@ -142,7 +143,7 @@ if __name__ == "__main__":
             if reco_p.is_contained != True:
                 continue
 
-            dEdx, dep_range = segmented_dEdx(reco_p, 2.0)
+            dEdx, dep_range = segmented_dEdx(reco_p, 1.0)
             # length = reco_p.length
 
             dEdx_list.extend(dEdx)
@@ -164,29 +165,29 @@ if __name__ == "__main__":
         xlabel = "dE/dx [MeV/cm]",
         title  = "Track dE/dx from 2cm segments",
         normalize_mc_to_data = True,
-        outfile=("plots/segmented_dEdx_from_2cm.png")
+        outfile=("plots/segmented_dEdx_from_1cm.png")
     )
 
     plot_2d_hist(
         data_df,
         x_column="dep_range",
         y_column="dEdx",
-        x_bins=np.linspace(0, 80, 40),
-        y_bins=np.linspace(0, 11, 40),
+        x_bins=np.linspace(0, 80, 80),
+        y_bins=np.linspace(0, 11, 80),
         xlabel="Residual Range [cm]",
         ylabel="dE/dx [MeV/cm]",
         title="Data dE/dx for Contained Tracks",
-        outfile=("plots/Data_Track_dEdcResRange.png")
+        outfile=("plots/Data_Track_1cm_dEdcResRange.png")
     )
 
     plot_2d_hist(
         mc_df,
         x_column="dep_range",
         y_column="dEdx",
-        x_bins=np.linspace(0, 80, 40),
-        y_bins=np.linspace(0, 11, 40),
+        x_bins=np.linspace(0, 80, 80),
+        y_bins=np.linspace(0, 11, 80),
         xlabel="Residual Range [cm]",
         ylabel="dE/dx [MeV/cm]",
         title="MC dE/dx for Contained Tracks",
-        outfile=("plots/MC_Track_dEdxResRange.png")
+        outfile=("plots/MC_Track_1cm_dEdxResRange.png")
     )
