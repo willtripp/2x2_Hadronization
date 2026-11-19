@@ -15,8 +15,8 @@ How well could we possibly reconstruct z?
 plots:
 1) truth and reco z distribution
 2) z resolution
-3) hadronic energy recolution:
-    Both using info available to the reco (so not neutros, etc...) and using the neutrino + lepton energy....
+3) hadronic energy resolution:
+    Both using info available to the reco (so not neutrons, etc...) and using the neutrino + lepton energy....
 4) leading hadron energy resolution
 """
 
@@ -53,6 +53,18 @@ def est_transferred_energy(interaction):
     # print(e_trans)
 
     return e_trans
+
+def est_hadronic_energy(reco_interaction, truth_interaction):
+    '''
+    We're going to fude the reco here a bit to get an upper bound on how well we can get the hadronic energy
+    i.e. we're going to use truth pids but then use the reco energies... but the truth masses (at least for hadrons)
+    Well... I guess we can use the best match but that may introduce problems for fragmented particles
+    TODO: A possible extension could be to enforce a cut on overlaps
+    Returns
+    -------
+
+    '''
+
 
 
 
@@ -166,6 +178,8 @@ for entry in range(len(MC_driver)):
     overlaps = mc["interaction_matches_r2t_overlap"]
 
     # entry_list.append(entry)
+
+    #fixme: change these cuts to be based on truth info where we could reasonably get better at reconstructing something
 
     for i, (reco_int, truth_int) in enumerate(pairs):
         if overlaps[i] < 0.5:
